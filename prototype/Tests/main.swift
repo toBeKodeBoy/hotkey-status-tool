@@ -93,7 +93,8 @@ let store = StatsStore(fileURL: url)
 check(store.records.count == 1, "merge and filter migration")
 let merged = store.records["⌘C"]!
 check(merged.count == 7, "merge totals")
-check(store.todayTotal == 3, "today counts")
+check(store.todayTotal == 0, "legacy time zone unknown; preserve without inventing daily buckets")
+check(store.applicationRecords[0].legacyToday.count == 2, "legacy dates preserved")
 check(sameTime(merged.firstSeen, earlier), "earliest first seen")
 check(sameTime(merged.lastSeen, later), "latest last seen")
 let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
@@ -105,8 +106,8 @@ check(reopened.records["⌘C"]?.count == 7, "migration idempotence")
 let backupsAfterReload = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
     .filter { $0.lastPathComponent.hasPrefix("records-v1-backup-") }
 check(backupsAfterReload.count == 1, "reload does not back up again")
-let file = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
-check(file.schemaVersion == 2, "version saved")
+let file = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+check(file["schemaVersion"] as? Int == 4, "version saved")
 
 let duplicateDir = try tempDir()
 defer { try? FileManager.default.removeItem(at: duplicateDir) }
@@ -116,7 +117,7 @@ try JSONEncoder().encode(Fixture(schemaVersion: 2, records: [
     record("⌘C", 8, cmd, 9, DayKey.today),
 ])).write(to: duplicateURL)
 let duplicateStore = StatsStore(fileURL: duplicateURL)
-check(duplicateStore.records["⌘C"]?.count == 9, "duplicate load keeps the later record")
+check(duplicateStore.records.isEmpty && duplicateStore.storageIssue != nil, "duplicate v2 records protected")
 
 let unknownDir = try tempDir()
 defer { try? FileManager.default.removeItem(at: unknownDir) }
@@ -180,11 +181,11 @@ check(fresh.todayTotal == 6, "today total sums current day")
 check(!FileManager.default.fileExists(atPath: freshURL.path), "records stay in memory before 50")
 for _ in 0..<44 { fresh.record(combo: "⌘A", keycode: 0, flags: cmd) }
 check(FileManager.default.fileExists(atPath: freshURL.path), "50th new record is saved")
-let savedAt50 = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: freshURL))
-check(savedAt50.records.first { $0.combo == "⌘A" }?.count == 46, "saved count includes the 50th record")
+let savedAt50 = StatsStore(fileURL: freshURL)
+check(savedAt50.records["⌘A"]?.count == 46, "saved count includes the 50th record")
 fresh.record(combo: "⌘A", keycode: 0, flags: cmd)
-let still50 = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: freshURL))
-check(still50.records.first { $0.combo == "⌘A" }?.count == 46, "51st record waits for the next save")
+let still50 = StatsStore(fileURL: freshURL)
+check(still50.records["⌘A"]?.count == 46, "51st record waits for the next save")
 check(changes == 51, "each record notifies")
 
 let previousDay = try JSONEncoder().encode(Fixture(schemaVersion: 2, records: [
@@ -211,8 +212,8 @@ clearing.record(combo: "⌘C", keycode: 8, flags: cmd)
 clearing.clear()
 check(clearing.records.isEmpty, "clear removes memory records")
 check(clearChanges == 2, "clear notifies")
-let cleared = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: clearURL))
-check(cleared.schemaVersion == 2 && cleared.records.isEmpty, "clear persists an empty file")
+let cleared = StatsStore(fileURL: clearURL)
+check(cleared.records.isEmpty, "clear persists an empty file")
 let clearedAgain = StatsStore(fileURL: clearURL)
 check(clearedAgain.records.isEmpty, "cleared file reloads empty")
 
@@ -242,7 +243,8 @@ check(unknownStore.storageIssue != nil, "unknown schema exposes protected status
 check(lockedStore.storageIssue != nil, "backup failure exposes protected status")
 
 // 初始化控制器会订阅共享存储；空窗口状态下主动触发回调，不能访问未创建的控件。
-let controller = StatsWindowController()
-StatsStore.shared.onChange?()
+let controller = StatsWindowController(store: fresh)
+fresh.onChange = { controller.reload() }
+fresh.onChange?()
 withExtendedLifetime(controller) {}
 print("PASS: mapping, filtering, migration, backup, restart, save, clear, unopened window callback")
