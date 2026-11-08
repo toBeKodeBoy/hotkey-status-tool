@@ -57,7 +57,10 @@ final class StatsStore {
     }
 
     var today: String { statisticsCalendar.day(clock()) }
-    var hasUndatedHistory: Bool { applicationRecords.contains { !$0.legacyToday.isEmpty } }
+    private(set) var hasUndatedHistory = false
+    var reopenNotification: Notification.Name {
+        DataLocation.reopenNotification(directory: fileURL.deletingLastPathComponent())
+    }
 
     @discardableResult
     func record(combo: String, keycode: Int, flags: UInt64,
@@ -93,19 +96,22 @@ final class StatsStore {
     }
 
     var records: [String: HotkeyRecord] { records(bundleID: nil) }
-    func records(bundleID: String?, unknownOnly: Bool = false) -> [String: HotkeyRecord] {
+    func records(bundleID: String?, unknownOnly: Bool = false, days: Int? = nil) -> [String: HotkeyRecord] {
         let day = today
+        let range = days.map { statisticsCalendar.days(ending: clock(), count: $0) }
         var result: [String: HotkeyRecord] = [:]
         for item in applicationRecords where (bundleID == nil || item.application.bundleID == bundleID) && (!unknownOnly || item.application.bundleID == nil) {
+            let count = range.map { days in days.reduce(0) { $0 + item.daily[$1, default: 0] } } ?? item.count
+            if range != nil && count == 0 { continue }
             if var existing = result[item.combo] {
-                existing.count += item.count
+                existing.count += count
                 existing.todayCount += item.daily[day, default: 0]
                 existing.firstSeen = min(existing.firstSeen, item.firstSeen)
                 existing.lastSeen = max(existing.lastSeen, item.lastSeen)
                 result[item.combo] = existing
             } else {
                 result[item.combo] = HotkeyRecord(combo: item.combo, keycode: item.keycode,
-                    flagsRaw: item.flagsRaw, count: item.count, todayCount: item.daily[day, default: 0],
+                    flagsRaw: item.flagsRaw, count: count, todayCount: item.daily[day, default: 0],
                     todayDate: day, firstSeen: item.firstSeen, lastSeen: item.lastSeen)
             }
         }
@@ -150,6 +156,7 @@ final class StatsStore {
     }
     func clear() {
         applicationRecords.removeAll()
+        hasUndatedHistory = false
         totalCount = 0
         index.removeAll()
         AppLogger.shared.log(.info, .recordsCleared)
@@ -240,6 +247,10 @@ final class StatsStore {
                 applicationRecords = migrated
                 save()
                 AppLogger.shared.log(.info, .migrationFinished)
+            }
+            // Compute completeness once at load; a UI refresh must not scan all historical days.
+            hasUndatedHistory = applicationRecords.contains {
+                !$0.legacyToday.isEmpty || $0.count > $0.daily.values.reduce(0, +)
             }
             totalCount = applicationRecords.reduce(0) { $0 + $1.count }
             for (position, record) in applicationRecords.enumerated() {

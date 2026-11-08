@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.statsWindow.setState(state)
         }
         reopenObserver = DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("local.HotkeyStats.reopen"), object: nil, queue: .main
+            forName: store.reopenNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.statsWindow.showWindow() }
         monitoring.refresh()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in

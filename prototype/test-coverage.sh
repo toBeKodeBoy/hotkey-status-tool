@@ -30,7 +30,7 @@ for CASE in core analytics logger runtime desktop; do
     desktop) ENTRY=Tests/Desktop/main.swift ;;
   esac
   EXTRA=()
-  if [[ "$CASE" == desktop ]]; then EXTRA=(Tests/Desktop/TapChecks.swift Tests/Desktop/LifecycleChecks.swift); fi
+  if [[ "$CASE" == desktop ]]; then EXTRA=(Tests/Desktop/TapChecks.swift Tests/Desktop/LifecycleChecks.swift Tests/Desktop/ReviewChecks.swift); fi
   swiftc "${FLAGS[@]}" "${LIBRARY[@]}" "$ENTRY" "${EXTRA[@]}" -framework AppKit -framework CoreGraphics -o "$WORK/$CASE"
   LLVM_PROFILE_FILE="$WORK/$CASE-%p.profraw" "$WORK/$CASE"
   if [[ "$CASE" == desktop ]]; then

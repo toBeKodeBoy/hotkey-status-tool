@@ -142,7 +142,7 @@ for zone in [nil, "GMT", "not-a-zone"] as [String?] {
     if zone == nil {
         check(result.hasUndatedHistory && result.todayTotal == 0, "v3 missing zone retained")
     } else if zone == "GMT" {
-        check(result.todayTotal == 2 && !result.hasUndatedHistory, "v3 known date retained")
+        check(result.todayTotal == 2 && result.hasUndatedHistory, "v3 known date retained")
     } else {
         check(result.storageIssue != nil, "invalid zone protects v3")
     }
@@ -303,3 +303,18 @@ try checkInvalid([appRecord(count: 2, legacy: [legacy(3)])])
 try checkInvalid([appRecord(count: Int.max, legacy: [legacy(Int.max), legacy(1)])])
 
 check(WorkspaceApplicationProvider(snapshot: { ("test", "") }).current().name == "test", "empty app name falls back to identity")
+
+check(store.records(bundleID: nil, days: 7).isEmpty, "expired records do not appear in range table")
+check(store.records(bundleID: nil, days: 30)["⌘T"]?.count == 3, "range aggregate across apps")
+check(store.records(bundleID: safari.bundleID, days: 30)["⌘T"]?.count == 2, "range app filter")
+check(store.records(bundleID: nil, unknownOnly: true, days: 30)["⌘A"]?.count == 3, "range unknown filter")
+check(store.records(bundleID: nil, days: 0).isEmpty, "empty range table")
+let scaleURL = fixtureURL()
+let scaleDay = StatisticsCalendar(timeZone: TimeZone(secondsFromGMT: 0)!).day(now)
+let scaleRows = (0..<2000).map { appRecord(count: 1, combo: "⌘Key-\($0)", daily: [scaleDay: 1]) }
+try JSONEncoder().encode(V4(schemaVersion: 4, timeZoneIdentifier: "GMT", applicationRecords: scaleRows)).write(to: scaleURL)
+let scale = StatsStore(fileURL: scaleURL, clock: { now })
+let queryStart = Date()
+let result = scale.records(bundleID: nil, days: 30)
+check(result.count == 2000 && result.values.reduce(0) { $0 + $1.count } == 2000, "single-pass range query at scale")
+print("PASS: range aggregation over 2000 combos in \(Int(Date().timeIntervalSince(queryStart) * 1000)) ms")

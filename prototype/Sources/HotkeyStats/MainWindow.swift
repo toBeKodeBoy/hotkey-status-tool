@@ -167,7 +167,8 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
             appFilter.addItem(withTitle: "未知应用")
             appFilter.lastItem?.representedObject = NSNull()
         }
-        var applications: [String: String] = [:]
+        // Ignored identities must remain selectable after their last record is cleared.
+        var applications = Dictionary(uniqueKeysWithValues: settings.ignored.map { ($0, $0) })
         for item in store.applicationRecords {
             if let id = item.application.bundleID { applications[id] = item.application.name }
         }
@@ -185,17 +186,12 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
         let appID = appFilter.selectedItem?.representedObject as? String
         ignoreToggle.isEnabled = appID != nil
         ignoreToggle.state = appID.map { settings.ignored.contains($0) } == true ? .on : .off
-        var scopedRecords = Array(store.records(bundleID: appID, unknownOnly: unknownOnly).values)
         let tableDays = [0, 1, 7, 30][min(3, max(0, tableRange.indexOfSelectedItem))]
-        if tableDays > 0 {
-            for position in scopedRecords.indices {
-                scopedRecords[position].count = store.trend(days: tableDays, bundleID: appID,
-                    combo: scopedRecords[position].combo, unknownOnly: unknownOnly).reduce(0) { $0 + $1.count }
-            }
-            scopedRecords.removeAll { $0.count == 0 }
-        }
+        let scopedRecords = Array(store.records(bundleID: appID, unknownOnly: unknownOnly,
+                                               days: tableDays == 0 ? nil : tableDays).values)
         data = RecordOrdering.sorted(scopedRecords, key: sortKey,
                                      ascending: ascending, today: store.today)
+        if let combo = selectedCombo, !data.contains(where: { $0.combo == combo }) { selectedCombo = nil }
         emptyLabel.isHidden = !data.isEmpty
         let hints: [MonitoringController.State: String] = [.running: "使用快捷键后，这里会显示统计。", .paused: "请从菜单继续统计。", .permissionMissing: "请从菜单打开输入监控设置并授权。", .failed: "请重新检查权限；若系统要求，请退出后重新打开。"]
         emptyLabel.stringValue = state.rawValue + "\n" + hints[state]!
@@ -217,11 +213,17 @@ final class StatsWindowController: NSObject, NSWindowDelegate {
             "\($0.combo) — 记录于 \($0.application.name)：累计 \($0.count) 次"
         }.joined(separator: "\n")
         let notice = "统计时区：" + store.statisticsCalendar.timeZone.identifier +
-            (store.hasUndatedHistory ? " ｜ 升级前日期时区未知，未纳入趋势" : "") +
+            (store.hasUndatedHistory ? " ｜ 历史累计含未分日记录，未纳入趋势" : "") +
             (selectedCombo.map { " ｜ " + $0 } ?? " ｜ 全部组合键")
         chart.rootView = TrendView(points: store.trend(days: days, bundleID: appID, combo: selectedCombo, unknownOnly: unknownOnly),
                                    notice: notice, conflicts: warning, details: details)
         tableView.reloadData()
+        // NSTableView retains row positions; restore the selected identity after sorting.
+        if let combo = selectedCombo, let row = data.firstIndex(where: { $0.combo == combo }) {
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            tableView.deselectAll(nil)
+        }
     }
 
     @objc private func refresh() { selectedCombo = nil; reload() }

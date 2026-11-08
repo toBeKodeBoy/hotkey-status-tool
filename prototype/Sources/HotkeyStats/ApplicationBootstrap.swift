@@ -1,7 +1,13 @@
 import AppKit
+import CryptoKit
 
 /// An absolute override permits isolated launches and portable local data without touching the default store.
 enum DataLocation {
+    static func reopenNotification(directory: URL) -> Notification.Name {
+        let path = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        let digest = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+        return Notification.Name("local.HotkeyStats.reopen." + digest)
+    }
     static func directory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let path = environment["HOTKEYSTATS_DATA_DIR"], path.hasPrefix("/") {
             return URL(fileURLWithPath: path, isDirectory: true)
@@ -17,9 +23,9 @@ struct ApplicationBootstrap {
     var createDirectory: (URL) throws -> Void = {
         try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
     }
-    var announce: () -> Void = {
+    var announce: (URL) -> Void = { directory in
         DistributedNotificationCenter.default().postNotificationName(
-            Notification.Name("local.HotkeyStats.reopen"), object: nil, userInfo: nil, deliverImmediately: true)
+            DataLocation.reopenNotification(directory: directory), object: nil, userInfo: nil, deliverImmediately: true)
     }
     var showError: () -> Void = {
         let alert = NSAlert()
@@ -40,7 +46,7 @@ struct ApplicationBootstrap {
                 AppLogger.shared.log(.info, .duplicateInstance)
                 AppLogger.shared.flush()
                 // Allow a simultaneously starting primary to install its observer.
-                for _ in 0..<5 { announce(); Thread.sleep(forTimeInterval: 0.1) }
+                for _ in 0..<5 { announce(directory); Thread.sleep(forTimeInterval: 0.1) }
                 return 0
             }
             withExtendedLifetime(lock) { runApplication() }

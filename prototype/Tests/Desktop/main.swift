@@ -217,4 +217,5 @@ let legacyController = StatsWindowController(store: StatsStore(fileURL: legacyUR
 legacyController.showWindow()
 for window in NSApp.windows where window.title == "热键统计" { window.close() }
 checkLifecycle(store: store, defaults: defaults, directory: directory)
+checkReviewRegressions(directory: directory)
 print("PASS: isolated AppKit window, chart hosting, filters, settings, menu and reopen")
