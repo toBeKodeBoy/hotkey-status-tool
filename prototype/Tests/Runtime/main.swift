@@ -145,3 +145,5 @@ for lhs in records + ties + oldRecords {
         }
     }
 }
+
+control.shutdown()

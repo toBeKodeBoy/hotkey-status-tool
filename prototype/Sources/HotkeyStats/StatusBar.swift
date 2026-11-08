@@ -3,8 +3,21 @@ import AppKit
 /// 菜单栏常驻入口：Top 5 快捷视图 + 今日统计 + 主窗口入口 + 退出。
 final class StatusBar: NSObject, NSMenuDelegate {
 
+    struct Actions {
+        var requestPermission = CGRequestListenEventAccess
+        var openURL: (URL) -> Bool = NSWorkspace.shared.open
+        var terminate: (Any?) -> Void = NSApplication.shared.terminate
+    }
+    private let actions: Actions
+    private let store: StatsStore
+    init(store: StatsStore = .shared, actions: Actions = Actions(), loginLaunch: LoginLaunch = LoginLaunch()) {
+        self.actions = actions
+        self.loginLaunch = loginLaunch
+        self.store = store
+        super.init()
+    }
     var monitoring: MonitoringController?
-    private let loginLaunch = LoginLaunch()
+    private let loginLaunch: LoginLaunch
     private var state: MonitoringController.State = .paused
     private var statusItem: NSStatusItem?
     private weak var windowController: StatsWindowController?
@@ -27,17 +40,28 @@ final class StatusBar: NSObject, NSMenuDelegate {
         self.state = state
         guard let button = statusItem?.button else { return }
         button.image = Self.icons[state]
-        button.imagePosition = .imageOnly
-        button.title = ""
-        button.toolTip = "HotkeyStats — " + state.rawValue
-        button.setAccessibilityLabel("HotkeyStats — " + state.rawValue)
+        refreshRanking()
+    }
+
+    func refreshRanking() {
+        guard let button = statusItem?.button else { return }
+        let leader = store.todayLeader
+        let title = RankingPresentation.title(leader: leader, running: state == .running)
+        if button.title != title { button.title = title }
+        button.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
+        let hint = "HotkeyStats — " + state.rawValue +
+            (state == .running && leader != nil ? " ｜ 今日第一名 " + leader! : "")
+        if button.toolTip != hint {
+            button.toolTip = hint
+            button.setAccessibilityLabel(hint)
+        }
     }
 
     /// 彩色应用图标不设为 template，避免系统将薄荷绿与黑底变成单色。
     /// 缓存四种状态，周期性权限检查不重复生成图像。
     private static let icons: [MonitoringController.State: NSImage] = {
         let base = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
-            .flatMap { NSImage(contentsOf: $0) } ?? NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 22, height: 22))
+            .flatMap { NSImage(contentsOf: $0) } ?? NSImage(size: NSSize(width: 22, height: 22))
         var result: [MonitoringController.State: NSImage] = [:]
         for state in [MonitoringController.State.running, .paused, .permissionMissing, .failed] {
             let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { _ in
@@ -71,7 +95,6 @@ final class StatusBar: NSObject, NSMenuDelegate {
         monitoring?.refresh()
         menu.removeAllItems()
 
-        let store = StatsStore.shared
         let top = store.sortedByCount.prefix(5)
         if let issue = store.storageIssue {
             let warning = NSMenuItem(title: "⚠ " + issue, action: nil, keyEquivalent: "")
@@ -94,7 +117,7 @@ final class StatusBar: NSObject, NSMenuDelegate {
         } else {
             for r in top {
                 let item = NSMenuItem(
-                    title: String(format: "%@   %d 次", r.combo, r.count),
+                    title: "\(r.combo)   \(r.count) 次 — 记录于 \(store.source(for: r.combo))",
                     action: nil, keyEquivalent: ""
                 )
                 item.isEnabled = false
@@ -136,15 +159,15 @@ final class StatusBar: NSObject, NSMenuDelegate {
         menu.addItem(quit)
     }
 
-    @objc private func retrySave() { StatsStore.shared.save() }
+    @objc private func retrySave() { store.save() }
 
     @objc private func togglePause() { monitoring?.togglePause() }
     @objc private func recheck() { monitoring?.refresh() }
     @objc private func toggleLogin() { loginLaunch.toggle() }
     @objc private func openPermissions() {
-        _ = CGRequestListenEventAccess()
+        _ = actions.requestPermission()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
+            _ = actions.openURL(url)
         }
     }
 
@@ -153,7 +176,7 @@ final class StatusBar: NSObject, NSMenuDelegate {
     }
 
     @objc private func quit() {
-        StatsStore.shared.save()
-        NSApp.terminate(nil)
+        store.save()
+        actions.terminate(nil)
     }
 }

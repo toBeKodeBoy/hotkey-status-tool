@@ -40,6 +40,7 @@ final class MonitoringController {
         self.defaults = defaults; self.permission = permission
         self.start = start; self.stop = stop
     }
+    func shutdown() { stop() }
     func togglePause() {
         // 用户暂停意图独立于权限，授权恢复后不能自动取消暂停。
         AppLogger.shared.log(.info, isPaused ? .resumeRequested : .pauseRequested)
